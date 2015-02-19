@@ -8,54 +8,57 @@ import Graphics.UI.Gtk
 
 import Game
 
-data GameSetup = GameSetup { gameState :: MVar GameState
+-- If there's a game running, there will be a tick timer running and an abstract state of the game.
+data GameSetup = GameSetup { gameState :: MVar (Maybe (GameState, HandlerId))
                            , cellImages :: Matrix Image
                            , colorPixbufs :: Array PuyoColor Pixbuf
                            }
-
-data GameInput = Tick | KeyPress | Whatever
-                 deriving (Eq, Show)
 
 -- Used to load cell images on startup
 colorPixBuf :: PuyoColor -> IO Pixbuf
 colorPixBuf c = pixbufNewFromFileAtScale (map toLower $ show c ++ ".png") 20 20 True
 
 setCellImage :: GameSetup -> PuyoCell -> Image -> IO ()
-setCellImage s cell image = case cell of 
+setCellImage g cell image = case cell of 
                               Empty -> imageClear image
                               Volatile color -> showColor color
                               Stable color -> showColor color
-    where showColor = imageSetFromPixbuf image . (!) (colorPixbufs s)
+    where showColor = imageSetFromPixbuf image . (!) (colorPixbufs g)
 
 -- Used once in setup to put the images in the table...
 tableAttachCell table s ix@(row,col) = tableAttach table (cellImages s ! ix) col (col + 1) row (row + 1) [Fill] [Fill] 0 0
 
-updateDisplay s@(GameSetup stateV images _) = do
-  state <- readMVar stateV
-  mapM_ (\ix -> setCellImage s (state ! ix) (images ! ix)) $ indices state
+updateDisplay :: GameSetup -> IO ()
+updateDisplay g@(GameSetup stateV images _) = do
+  st <- readMVar stateV
+  case st of Nothing -> return ()
+             Just (state, _) -> do
+               let grid = gameGrid state
+               mapM_ (\ix -> setCellImage g (grid ! ix) (images ! ix)) $ indices grid
 
--- A demo function for showing that something happens over time
-toggleTopLeft :: GameSetup -> IO ()
-toggleTopLeft (GameSetup s _ _) = 
-    void $ modifyMVar s $ \grid -> do
-        let newColor = case grid ! (0,0) of 
-                         Stable Red -> Stable Green
-                         _ -> Stable Red
-            newGrid = grid // [((0,0), newColor)]
-        return (newGrid, newGrid)
+restartGame :: GameSetup -> IO ()
+restartGame g = do
+  (state, startTimer) <- newGameState
+  newTimer <- timeoutAdd (runInput g Tick >> return True) startTimer
+  modifyMVar_ (gameState g) $ const $ return $ Just (state, newTimer)
 
-restartGame s = do
-  newGame <- newGameState
-  modifyMVar (gameState s) (\_ -> return (newGame, newGame))
+updateTimer :: GameSetup -> HandlerId -> ModifyTimer -> IO HandlerId
+updateTimer g oldTimer timerChange = 
+    case timerChange of 
+      Nothing -> return oldTimer
+      Just n -> do 
+        timeoutRemove oldTimer
+        timeoutAdd (runInput g Tick >> return True) n
 
--- TODO: A better version with cairo rendering.
--- Image drawing is just a bit of a hassle...
+runInput :: GameSetup -> GameInput -> IO ()
+runInput s input = do 
+  modifyMVar_ (gameState s) $ \oldState -> 
+      case oldState of Nothing -> error "Shouldn't tick while not running."
+                       Just (oldState, oldTimer) -> do
+                           let (newState, timerChange) = gameStep oldState input -- game logic call
 
-setupGame colorBufs images = do
-  s <- newMVar $ listArray ((0,0), (gridHeight - 1, gridWidth - 1)) $ repeat (Stable Red)
-  return $ GameSetup s
-              (listArray ((0,0), (gridHeight - 1, gridWidth - 1)) images)
-              (listArray (Red,Yellow) colorBufs)
+                           newTimer <- updateTimer s oldTimer timerChange
+                           return $ Just (newState, newTimer)
 
 main = do
   initGUI
@@ -75,17 +78,19 @@ main = do
 
   images <- mapM (const imageNew) [1..gridWidth * gridHeight]
 
-  -- s is sort of a hack to get everything to everywhere.
-  s <- setupGame colorBufs images
+  st <- newMVar Nothing
+  let g = GameSetup st
+             (listArray ((0,0), (gridHeight - 1, gridWidth - 1)) images)
+             (listArray (Red,Yellow) colorBufs)
 
-  mapM_ (tableAttachCell imageTable s) $ indices (cellImages s)
+  -- Todo: Have our own state where we show something nice while the game isn't running
+  -- Todo: Decide how we store and display "between games"
 
-  onClicked newGameButton $ void $ restartGame s >> updateDisplay s
+  mapM_ (tableAttachCell imageTable g) $ indices (cellImages g)
 
-  updateDisplay s
+  onClicked newGameButton $ void $ restartGame g >> updateDisplay g
 
-  -- Pretend to do something over time - set a timer and toggle a cell
-  t <- timeoutAdd (toggleTopLeft s >> updateDisplay s >> return True) 1000
+  --t <- timeoutAdd (toggleTopLeft s >> updateDisplay s >> return True) 1000
 
   set window [ windowDefaultHeight := 400, windowDefaultWidth := 200,
                containerChild := layout ]
