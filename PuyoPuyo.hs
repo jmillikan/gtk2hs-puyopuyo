@@ -1,12 +1,14 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 import Control.Monad
+import Control.Monad.IO.Class
 import Control.Concurrent.MVar
 import Data.Array
+import Data.Tuple (swap)
 import Data.Char (toLower)
 import Graphics.UI.Gtk
+import System.Glib.UTFString
 
 import Game
+import qualified Game as G (GameInput(..))
 
 -- If there's a game running, there will be a tick timer running and an abstract state of the game.
 data GameSetup = GameSetup { gameState :: MVar (Maybe (GameState, HandlerId))
@@ -18,14 +20,12 @@ data GameSetup = GameSetup { gameState :: MVar (Maybe (GameState, HandlerId))
 colorPixBuf :: PuyoColor -> IO Pixbuf
 colorPixBuf c = pixbufNewFromFileAtScale (map toLower $ show c ++ ".png") 20 20 True
 
-setCellImage :: GameSetup -> PuyoCell -> Image -> IO ()
+setCellImage :: GameSetup -> (Maybe PuyoColor) -> Image -> IO ()
 setCellImage g cell image = case cell of 
-                              Empty -> imageClear image
-                              Volatile color -> showColor color
-                              Stable color -> showColor color
+                              Nothing -> imageClear image
+                              Just color -> showColor color
     where showColor = imageSetFromPixbuf image . (!) (colorPixbufs g)
 
--- Used once in setup to put the images in the table...
 tableAttachCell table s ix@(row,col) = tableAttach table (cellImages s ! ix) col (col + 1) row (row + 1) [Fill] [Fill] 0 0
 
 updateDisplay :: GameSetup -> IO ()
@@ -33,8 +33,7 @@ updateDisplay g@(GameSetup stateV images _) = do
   st <- readMVar stateV
   case st of Nothing -> return ()
              Just (state, _) -> do
-               let grid = gameGrid state
-               mapM_ (\ix -> setCellImage g (grid ! ix) (images ! ix)) $ indices grid
+               mapM_ (\(ix, c) -> setCellImage g c (images ! ix)) $ getGrid state
 
 restartGame :: GameSetup -> IO ()
 restartGame g = do
@@ -56,9 +55,24 @@ runInput s input = do
       case oldState of Nothing -> error "Shouldn't tick while not running."
                        Just (oldState, oldTimer) -> do
                            let (newState, timerChange) = gameStep oldState input -- game logic call
-
                            newTimer <- updateTimer s oldTimer timerChange
+                           putStrLn $ "Ran input " ++ show input
                            return $ Just (newState, newTimer)
+  updateDisplay s
+
+keyNameToInput :: String -> Maybe GameInput
+keyNameToInput k = case k of
+                     "Left" -> Just G.Left
+                     "Down" -> Just G.Down
+                     "Right" -> Just G.Right
+                     "a" -> Just G.Left
+                     "s" -> Just G.Down
+                     "d" -> Just G.Right
+                     "Control_L" -> Just G.RotLeft
+                     "Alt_L" -> Just G.RotRight
+                     "Alt_R" -> Just G.RotLeft
+                     "Control_R" -> Just G.RotRight
+                     _ -> Nothing
 
 main = do
   initGUI
@@ -89,6 +103,11 @@ main = do
   mapM_ (tableAttachCell imageTable g) $ indices (cellImages g)
 
   onClicked newGameButton $ void $ restartGame g >> updateDisplay g
+  window `on` keyPressEvent $ tryEvent $ do
+         keyVal <- eventKeyVal
+         case keyNameToInput $ glibToString $ keyName keyVal of
+           Nothing -> return ()
+           Just input -> liftIO $ runInput g input
 
   --t <- timeoutAdd (toggleTopLeft s >> updateDisplay s >> return True) 1000
 
