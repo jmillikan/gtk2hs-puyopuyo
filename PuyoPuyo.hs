@@ -14,6 +14,7 @@ import qualified Game as G (GameInput(..))
 data GameSetup = GameSetup { gameState :: MVar (Maybe (GameState, HandlerId))
                            , cellImages :: Matrix Image
                            , colorPixbufs :: Array PuyoColor Pixbuf
+                           , emptyPixbuf :: Pixbuf
                            }
 
 -- Used to load cell images on startup
@@ -21,15 +22,15 @@ colorPixBuf :: PuyoColor -> IO Pixbuf
 colorPixBuf c = pixbufNewFromFileAtScale (map toLower $ show c ++ ".png") 20 20 True
 
 setCellImage :: GameSetup -> (Maybe PuyoColor) -> Image -> IO ()
-setCellImage g cell image = case cell of 
-                              Nothing -> imageClear image
-                              Just color -> showColor color
-    where showColor = imageSetFromPixbuf image . (!) (colorPixbufs g)
+setCellImage g cell image = imageSetFromPixbuf image $
+                            case cell of 
+                              Nothing -> emptyPixbuf g
+                              Just color -> colorPixbufs g ! color
 
 tableAttachCell table s ix@(row,col) = tableAttach table (cellImages s ! ix) col (col + 1) row (row + 1) [Fill] [Fill] 0 0
 
 updateDisplay :: GameSetup -> IO ()
-updateDisplay g@(GameSetup stateV images _) = do
+updateDisplay g@(GameSetup stateV images _ _) = do
   st <- readMVar stateV
   case st of Nothing -> return ()
              Just (state, _) -> do
@@ -91,10 +92,13 @@ main = do
 
   images <- mapM (const imageNew) [1..gridWidth * gridHeight]
 
+  emptyBuf <- pixbufNewFromFileAtScale "empty.png" 20 20 True
+
   st <- newMVar Nothing
   let g = GameSetup st
              (listArray ((0,0), (gridHeight - 1, gridWidth - 1)) images)
              (listArray (Red,Yellow) colorBufs)
+             emptyBuf
 
   -- Todo: Have our own state where we show something nice while the game isn't running
   -- Todo: Decide how we store and display "between games"

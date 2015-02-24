@@ -37,8 +37,14 @@ exBlock = listArray ((0,0), (1,1)) [Just Red, Just Green, Nothing, Nothing]
 
 exGrid = listArray ((0, 0), (gridHeight - 1, gridWidth - 1)) $ Stable Red : repeat Empty
 
+instance Arbitrary PuyoColor where
+    arbitrary = elements [Red, Green, Yellow, Blue]
+
 instance Arbitrary Block where
-    arbitrary = elements [ exBlock ] -- TODO
+    arbitrary = do 
+      color1 <- arbitrary
+      color2 <- arbitrary
+      return $ listArray ((0,0),(1,1)) [Just color1, Just color2, Nothing, Nothing]
 
 gridWidth, gridHeight :: Int
 gridWidth = 6
@@ -71,7 +77,7 @@ getGrid g = map (first flipY . overlayBlock . justColors) (indices $ gameGrid g)
                                    (GameState (ControlBlock b bix) _ _) ->
                                        -- map ix to inside b...
                                         let bCellPos = ix -% bix in
-                                        if inRange (bounds b) bCellPos
+                                        if inRange (bounds b) bCellPos && (b ! bCellPos) /= Nothing
                                         then (ix, b ! bCellPos)
                                         else (ix, p)
           flipY (y,x) = (gridHeight - y - 1,x)
