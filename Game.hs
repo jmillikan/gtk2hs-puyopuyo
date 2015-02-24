@@ -6,6 +6,7 @@ import Control.Arrow
 import Data.Maybe
 import Data.Array
 import Data.Ix
+import Data.List
 import System.Random
 import Test.QuickCheck.Gen
 import Test.QuickCheck.Random
@@ -145,7 +146,7 @@ dropIx = first (\x -> x - 1)
 
 -- iterate ixDroppable by removing droppables until it reaches a fixed point
 dropPuyos :: Grid -> Grid
-dropPuyos grid = (grid // [(ix, Empty) | ix <- allDroppable]) // [(dropIx ix, grid ! ix) | ix <- allDroppable]
+dropPuyos grid = (grid // [(ix, Empty) | ix <- allDroppable]) // [(dropIx ix, makeVolatile $ grid ! ix) | ix <- allDroppable]
    -- This is... Not efficient?
     where moreDroppable newGrid droppable = 
               let newDroppable = filter (ixDroppable newGrid) $ indices newGrid in
@@ -154,12 +155,34 @@ dropPuyos grid = (grid // [(ix, Empty) | ix <- allDroppable]) // [(dropIx ix, gr
               else moreDroppable (newGrid // [(ix, Empty) | ix <- newDroppable]) (droppable ++ newDroppable)
 --          allDroppable = filter (ixDroppable grid) $ indices grid
           allDroppable = moreDroppable grid []
+          makeVolatile cell = case cell of
+                                Stable c -> Volatile c
+                                Volatile c -> Volatile c
+                                Empty -> Empty
 
 removeablePuyos :: Grid -> Bool
-removeablePuyos grid = False
+removeablePuyos grid = not $ null $ removableGroups grid
+
+removableGroups grid = filter ((> 3) . length) $ map (floodColor . (\x -> [x])) $ volatileIxs grid
+    -- Brute force, not a proper search.
+    where floodColor ixs@(ix:_) = let newIxs = nub $ (++) ixs $ filter (sameColorIx ix) $ concat $ map cross ixs
+                                  in if newIxs == ixs then ixs 
+                                     else floodColor newIxs
+          cross ix = filter (inRange $ bounds grid) $ map (+% ix) [(1,0),(-1,0),(0,1),(0,-1)]
+          sameColorIx ix ix2 = sameColor (grid ! ix) (grid ! ix2)
+          sameColor Empty _ = False
+          sameColor _ Empty = False
+          sameColor c1 c2 = colorAt c1 == colorAt c2
+          colorAt (Stable c) = c
+          colorAt (Volatile c) = c
+
+volatileIxs :: Grid -> [(Int, Int)]
+volatileIxs grid = filter (volatile . (grid !)) $ indices grid
+    where volatile (Volatile c) = True
+          volatile _ = False
 
 breakPuyos :: Grid -> Grid
-breakPuyos = undefined
+breakPuyos grid = grid // [(ix, Empty) | ixs <- removableGroups grid, ix <- ixs]
 
 -- TODO: We really should just break down the gamestate here and fix the
 -- function signatures so they aren't incomplete...

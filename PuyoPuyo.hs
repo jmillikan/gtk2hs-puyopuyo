@@ -56,7 +56,6 @@ runInput s input = do
                        Just (oldState, oldTimer) -> do
                            let (newState, timerChange) = gameStep oldState input -- game logic call
                            newTimer <- updateTimer s oldTimer timerChange
-                           putStrLn $ "Ran input " ++ show input
                            return $ Just (newState, newTimer)
   updateDisplay s
 
