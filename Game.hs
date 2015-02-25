@@ -89,38 +89,12 @@ newGameState :: IO (GameState, Int)
 -- Hardcoded start - one red cell to verify we're going, and a timeout
 newGameState = do
   let blocks = blockQueue 42 -- todo: randomness
-  return $ (GameState (ControlBlock (head blocks) (10, 1)) (tail blocks) exGrid, dropTimeout)
+  return $ (GameState (ControlBlock (head blocks) (12, 1)) (tail blocks) exGrid, dropTimeout)
 
 attachBlock :: Block -> (Int, Int) -> Grid -> Grid 
 -- This is dumb. it turns out an Array of Maybes/other sums isn't great for
 -- what I'm doing. (Or I'm using them very wrong.)
 attachBlock b bix grid = grid // map ((bix +%) &&& Volatile . fromJust . (b !)) (occupiedIxs b)
-
--- TODO: Most of these should not take or return all of GameState nor return all of (GameState, ModifyTimer). 
--- They should do more specific transforms, and information about timers should probably go into gamestep or helpers
--- Probably rework this by having a single function tryNewPos
-
--- Try a left/right move. Not sure why I took the whole ix...
--- TODO: Merge with tryDrop, branching in here on whether there's y-change
-tryMove :: GameState -> (Int, Int) -> (GameState, ModifyTimer)
-tryMove g@(GameState (ControlBlock b ix) queue grid) mv 
-        | movePossible grid b ix mv = (GameState (ControlBlock b (ix +% mv)) queue grid, Nothing)
-        | otherwise = (g, Nothing)
-
-tryDrop :: GameState -> (GameState, ModifyTimer)
-tryDrop g@(GameState (ControlBlock b bix) queue grid) 
-        | movePossible grid b bix (-1,0) = (GameState (ControlBlock b (bix +% (-1,0))) queue grid, Just dropTimeout)
-        | otherwise = (GameState Cascading queue (attachBlock b bix grid), Just cascadeTimeout)
-
-tryRotate :: GameState -> Bool -> (GameState, ModifyTimer)
-tryRotate g@(GameState (ControlBlock b ix) queue grid) rotLeft
-    | movePossible grid (rotateBlock b rotLeft) ix (0,0) = (GameState (ControlBlock (rotateBlock b rotLeft) ix) queue grid, Nothing)
-    | otherwise = (g, Nothing)
-
--- TODO: Write this for any square bounds, though in this game they're all ((0,0),(1,1))
-rotateBlock :: Block -> Bool -> Block
-rotateBlock bl rotLeft = let [a,b,c,d] = elems bl in
-                        listArray ((0,0),(1,1)) $ if rotLeft then [b,d,a,c] else [c,a,d,b]
 
 -- TODO: Refactor to be "positionPossible" without mv?
 movePossible :: Grid -> Block -> (Int, Int) -> (Int, Int) -> Bool
@@ -133,13 +107,6 @@ movePossible grid b bix mv =
     where notOccupied ix = Empty == (grid ! ix)
 
 occupiedIxs b = filter (not . (== Nothing) . (b !)) (indices b)
-
-continueCascade :: GameState -> (GameState, ModifyTimer)
--- For now, just terminate cascade after 1 tick...
-continueCascade (GameState Cascading (b:bs) grid)
-    | droppablePuyos grid  = (GameState Cascading (b:bs) (dropPuyos grid), Nothing)
-    | removeablePuyos grid = (GameState Cascading (b:bs) (breakPuyos grid), Nothing)
-    | otherwise            = (GameState (ControlBlock b (12,1)) bs grid, Just dropTimeout)
 
 droppablePuyos :: Grid -> Bool
 droppablePuyos grid = any (ixDroppable grid) $ indices grid 
@@ -190,18 +157,37 @@ volatileIxs grid = filter (volatile . (grid !)) $ indices grid
 breakPuyos :: Grid -> Grid
 breakPuyos grid = grid // [(ix, Empty) | ixs <- removableGroups grid, ix <- ixs]
 
--- TODO: We really should just break down the gamestate here and fix the
--- function signatures so they aren't incomplete...
+-- Currently only works on our 2x2 blocks.
+rotate :: Block -> Bool -> Block
+rotate bl rotLeft = let [a,b,c,d] = elems bl in
+                         listArray ((0,0),(1,1)) $ if rotLeft then [b,d,a,c] else [c,a,d,b]
+
+
+-- This is a bit thick to avoid destructuring GameState in a lot of places.
 gameStep :: GameState -> GameInput -> (GameState, ModifyTimer)
-gameStep g Tick 
-    | cascading g = continueCascade g
-    | otherwise   = tryDrop g
-gameStep g input 
+gameStep (GameState Cascading queue@(b:bs) grid) Tick
+    -- Right now, the speed of these is locked to the tick since I haven't botherered making any intermediate states.
+    | droppablePuyos grid  = (GameState Cascading queue (dropPuyos grid), Nothing)
+    | removeablePuyos grid = (GameState Cascading queue (breakPuyos grid), Nothing)
+    | otherwise            = (GameState (ControlBlock b (12,1)) bs grid, Just dropTimeout)
+gameStep g@(GameState (ControlBlock b bix) queue grid) input 
     | cascading g = (g, Nothing) -- Ignore input while cascading
     | otherwise   = case input of
-                      Game.Left -> tryMove g (0,-1)
-                      Game.Right -> tryMove g (0,1)
-                      Game.Down -> tryDrop g
-                      RotLeft -> tryRotate g True
-                      RotRight -> tryRotate g False
-                      _ -> (g, Nothing) -- Ignore other inputs (including Tick because I'm back)
+                      Tick -> tryDrop
+                      Game.Left -> tryMove (0,-1)
+                      Game.Right -> tryMove (0,1)
+                      Game.Down -> tryDrop
+                      RotLeft -> tryRotate True
+                      RotRight -> tryRotate False
+    where tryRotate left = tryChange (rotate b left) (0,0) Nothing noChange
+          tryMove mv     = tryChange b mv Nothing noChange
+          tryDrop        = tryChange b (-1,0) (Just dropTimeout) toCascade
+
+          -- Try a move/rotate. If successful, "keep it" with the timer change. If failed, return fail.
+          tryChange newB ixChange succeedTimerChange fail
+              | movePossible grid newB bix ixChange = 
+                  (GameState (ControlBlock newB (bix +% ixChange)) queue grid, succeedTimerChange)
+              | otherwise = fail
+          noChange = (g, Nothing)
+          toCascade = (GameState Cascading queue (attachBlock b bix grid), Just cascadeTimeout)
+
