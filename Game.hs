@@ -1,14 +1,17 @@
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE TemplateHaskell #-}
 
-module Game (newGameState, gameStep, getGrid, gridWidth, gridHeight, GameState, ModifyTimer(..), Matrix, Grid, PuyoColor(..), PuyoCell(..), GameInput(..)) where
+module Game (newGameState, gameStep, getGrid, gridWidth, gridHeight, GameState, PuyoColor(..), GameInput(..)) where
 
+import Control.Lens
 import Control.Arrow
 import Data.Maybe
-import Data.Array
+import qualified Data.Array as A
+import Data.Array ((!), Array, listArray, elems, (//), bounds, assocs)
 import Data.Ix
 import Data.List
 import System.Random
-import Test.QuickCheck.Gen
+import qualified Test.QuickCheck.Gen as G
 import Test.QuickCheck.Random
 import Test.QuickCheck.Arbitrary
 
@@ -28,17 +31,20 @@ data BaseState = ControlBlock Block (Int, Int) | Cascading
 type Grid = Matrix PuyoCell
 
 type Matrix a = Array (Int, Int) a
-data GameState = GameState { baseState :: BaseState
-                           , pieceQueue :: [Block]
-                           , gameGrid :: Grid
+data GameState = GameState { _baseState :: BaseState
+                           , _pieceQueue :: [Block]
+                           , _gameGrid :: Grid
                            }
 
+makeLenses ''GameState
+
+-- Used for ad-hoc testing...
 exBlock = listArray ((0,0), (1,1)) [Just Red, Just Green, Nothing, Nothing]
 
 exGrid = listArray ((0, 0), (gridHeight - 1, gridWidth - 1)) $ Stable Red : repeat Empty
 
 instance Arbitrary PuyoColor where
-    arbitrary = elements [Red, Green, Yellow, Blue]
+    arbitrary = G.elements [Red, Green, Yellow, Blue]
 
 instance Arbitrary Block where
     arbitrary = do 
@@ -63,12 +69,12 @@ cascading _ = False
 type ModifyTimer = Maybe Int
 
 blockQueue :: Int -> [Block]
-blockQueue seed = unGen infiniteList (mkQCGen seed) seed 
+blockQueue seed = G.unGen infiniteList (mkQCGen seed) seed 
 
 -- "translate" our game state into a visible grid including current block
 getGrid :: GameState -> [((Int, Int), Maybe PuyoColor)]
-getGrid g = map (first flipY . overlayBlock . justColors) (indices $ gameGrid g)
-    where justColors ix = case gameGrid g ! ix of 
+getGrid g = map (first flipY . overlayBlock . justColors) (A.indices $ _gameGrid g)
+    where justColors ix = case _gameGrid g ! ix of 
                            Empty -> (ix, Nothing)
                            Stable c -> (ix, Just c)
                            Volatile c -> (ix, Just c)
@@ -104,10 +110,10 @@ positionPossible grid b newIx =
     let bixsOnGrid = gridIxs b newIx in
     all (inRange (bounds grid)) bixsOnGrid && 
     all ((Empty ==) . (grid !)) bixsOnGrid
-    where gridIxs b bix = map (+% bix) $ filter (not . (== Nothing) . (b !)) (indices b)
+    where gridIxs b bix = map (+% bix) $ filter (not . (== Nothing) . (b !)) (A.indices b)
 
 droppablePuyos :: Grid -> Bool
-droppablePuyos grid = any (ixDroppable grid) $ indices grid 
+droppablePuyos grid = any (ixDroppable grid) $ A.indices grid 
 
 ixDroppable :: Grid -> (Int, Int) -> Bool
 ixDroppable grid ix = inRange (bounds grid) (dropIx ix) && 
@@ -122,7 +128,7 @@ dropPuyos :: Grid -> Grid
 dropPuyos grid = (grid // [(ix, Empty) | ix <- allDroppable]) // [(dropIx ix, makeVolatile $ grid ! ix) | ix <- allDroppable]
    -- This is... Not efficient?
     where moreDroppable newGrid droppable = 
-              let newDroppable = filter (ixDroppable newGrid) $ indices newGrid in
+              let newDroppable = filter (ixDroppable newGrid) $ A.indices newGrid in
               if newDroppable == [] 
               then droppable 
               else moreDroppable (newGrid // [(ix, Empty) | ix <- newDroppable]) (droppable ++ newDroppable)
@@ -150,7 +156,7 @@ removableGroups grid = filter ((> 3) . length) $ map (floodColor . (\x -> [x])) 
           colorAt (Volatile c) = c
 
 volatileIxs :: Grid -> [(Int, Int)]
-volatileIxs grid = filter (volatile . (grid !)) $ indices grid
+volatileIxs grid = filter (volatile . (grid !)) $ A.indices grid
     where volatile (Volatile c) = True
           volatile _ = False
 

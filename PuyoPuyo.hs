@@ -12,7 +12,7 @@ import qualified Game as G (GameInput(..))
 
 -- If there's a game running, there will be a tick timer running and an abstract state of the game.
 data GameSetup = GameSetup { gameState :: MVar (Maybe (GameState, HandlerId))
-                           , cellImages :: Matrix Image
+                           , cellImages :: Array (Int, Int) Image
                            , colorPixbufs :: Array PuyoColor Pixbuf
                            , emptyPixbuf :: Pixbuf
                            }
@@ -42,7 +42,7 @@ restartGame g = do
   newTimer <- timeoutAdd (runInput g Tick >> return True) startTimer
   modifyMVar_ (gameState g) $ const $ return $ Just (state, newTimer)
 
-updateTimer :: GameSetup -> HandlerId -> ModifyTimer -> IO HandlerId
+updateTimer :: GameSetup -> HandlerId -> Maybe Int -> IO HandlerId
 updateTimer g oldTimer timerChange = 
     case timerChange of 
       Nothing -> return oldTimer
