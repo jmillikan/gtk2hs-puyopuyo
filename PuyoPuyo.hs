@@ -106,6 +106,7 @@ main = do
   mapM_ (tableAttachCell imageTable g) $ indices (cellImages g)
 
   onClicked newGameButton $ void $ restartGame g >> updateDisplay g
+
   window `on` keyPressEvent $ tryEvent $ do
          keyVal <- eventKeyVal
          case keyNameToInput $ glibToString $ keyName keyVal of
