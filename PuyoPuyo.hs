@@ -78,15 +78,11 @@ main = do
   initGUI
   window <- windowNew
   imageTable <- tableNew gridWidth gridHeight True
-  layout <- tableNew 3 2 False
+  layout <- tableNew 1 2 False
 
-  labelLeft <- labelNew $ Just ("Left" :: String)
-  labelRight <- labelNew $ Just ("Right" :: String)
   newGameButton <- buttonNewWithLabel ("New Game" :: String)
-  tableAttachDefaults layout labelLeft 0 1 0 1
-  tableAttachDefaults layout imageTable 1 2 0 1
-  tableAttachDefaults layout newGameButton 0 3 1 2
-  tableAttachDefaults layout labelRight 2 3 0 2
+  tableAttachDefaults layout imageTable 0 1 0 1
+  tableAttachDefaults layout newGameButton 0 1 1 2
   
   colorBufs <- mapM colorPixBuf [Red,Green,Blue,Yellow]
 
