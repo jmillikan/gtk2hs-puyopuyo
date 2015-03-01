@@ -87,7 +87,7 @@ main = do
   colorBufs <- mapM colorPixBuf [Red,Green,Blue,Yellow]
 
   images <- mapM (const imageNew) [1..gridWidth * gridHeight]
-
+  
   emptyBuf <- pixbufNewFromFileAtScale "empty.png" 20 20 True
 
   st <- newMVar Nothing
@@ -96,20 +96,20 @@ main = do
              (listArray (Red,Yellow) colorBufs)
              emptyBuf
 
-  -- Todo: Have our own state where we show something nice while the game isn't running
-  -- Todo: Decide how we store and display "between games"
+  mapM (\i -> setCellImage g Nothing i) images
 
   mapM_ (tableAttachCell imageTable g) $ indices (cellImages g)
 
   onClicked newGameButton $ void $ restartGame g >> updateDisplay g
 
   window `on` keyPressEvent $ tryEvent $ do
-         keyVal <- eventKeyVal
-         case keyNameToInput $ glibToString $ keyName keyVal of
+         key <- fmap (glibToString . keyName) eventKeyVal
+         if key == "n"
+         then liftIO $ restartGame g >> updateDisplay g
+         else return ()
+         case keyNameToInput key of
            Nothing -> return ()
            Just input -> liftIO $ runInput g input
-
-  --t <- timeoutAdd (toggleTopLeft s >> updateDisplay s >> return True) 1000
 
   set window [ windowDefaultHeight := 400, windowDefaultWidth := 200,
                containerChild := layout ]
