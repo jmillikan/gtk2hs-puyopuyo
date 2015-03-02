@@ -78,11 +78,13 @@ main = do
   initGUI
   window <- windowNew
   imageTable <- tableNew gridWidth gridHeight True
-  layout <- tableNew 1 2 False
+  layout <- tableNew 2 3 False
+  score <- labelNew $ Just "0000"
 
   newGameButton <- buttonNewWithLabel ("New Game" :: String)
-  tableAttachDefaults layout imageTable 0 1 0 1
-  tableAttachDefaults layout newGameButton 0 1 1 2
+  tableAttachDefaults layout imageTable 0 1 0 3
+  tableAttachDefaults layout score 1 2 0 1
+  tableAttachDefaults layout newGameButton 1 2 2 3
   
   colorBufs <- mapM colorPixBuf [Red,Green,Blue,Yellow]
 
@@ -96,6 +98,7 @@ main = do
              (listArray (Red,Yellow) colorBufs)
              emptyBuf
 
+  -- Until the image controls contain images, the shape/size is wrong.
   mapM (\i -> setCellImage g Nothing i) images
 
   mapM_ (tableAttachCell imageTable g) $ indices (cellImages g)
@@ -111,7 +114,7 @@ main = do
            Nothing -> return ()
            Just input -> liftIO $ runInput g input
 
-  set window [ windowDefaultHeight := 400, windowDefaultWidth := 200,
+  set window [ windowDefaultHeight := 13 * 20, windowDefaultWidth := 200,
                containerChild := layout ]
   onDestroy window mainQuit
   widgetShowAll window

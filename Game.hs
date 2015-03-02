@@ -1,7 +1,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE TemplateHaskell #-}
 
-module Game (newGameState, gameStep, getGrid, gridWidth, gridHeight, GameState, PuyoColor(..), GameInput(..)) where
+module Game (newGameState, gameStep, getGrid, getScore, gridWidth, gridHeight, GameState, PuyoColor(..), GameInput(..)) where
 
 import Control.Lens
 import Control.Arrow
@@ -69,6 +69,9 @@ blockQueue seed = G.unGen infiniteList (mkQCGen seed) seed
 getGrid :: GameState -> [((Int, Int), Maybe PuyoColor)]
 getGrid (GameState (ControlBlock b bix) _ grid) = toCellList $ attachBlock b bix grid
 getGrid (GameState _ _ grid) = toCellList grid
+
+getScore :: GameState -> Int
+getScore _ = 9999
 
 toCellList :: Grid -> [((Int, Int), Maybe PuyoColor)]
 toCellList g = map (flipY *** color) $ A.assocs g

@@ -1,0 +1,3 @@
+Basic puyo-puyo like game mechanics in gtk2hs. Not packaged properly. With a recent haskell platform, try "cabal install gtk2hs-buildtools gtk quickcheck lens" and "runhaskell PuyoPuyo.hs".
+
+Controls: N for new game, arrows/asd for left/right/drop, and Ctrl/Alt for rotate.
