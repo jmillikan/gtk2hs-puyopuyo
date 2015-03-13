@@ -103,7 +103,9 @@ main = do
 
   mapM_ (tableAttachCell imageTable g) $ indices (cellImages g)
 
-  onClicked newGameButton $ void $ restartGame g >> updateDisplay g
+  onClicked newGameButton $ void $ do
+         restartGame g
+         updateDisplay g
 
   window `on` keyPressEvent $ tryEvent $ do
          key <- fmap (glibToString . keyName) eventKeyVal

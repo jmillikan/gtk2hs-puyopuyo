@@ -5,6 +5,7 @@ module Game (newGameState, gameStep, getGrid, getScore, gridWidth, gridHeight, G
 
 import Control.Lens
 import Control.Arrow
+import Control.Applicative
 import qualified Data.Array as A
 import Data.Array ((!), Array, listArray, (//), bounds, assocs)
 import Data.Ix
@@ -46,10 +47,7 @@ instance Arbitrary PuyoColor where
     arbitrary = G.elements [Red, Green, Yellow, Blue]
 
 instance Arbitrary Block where
-    arbitrary = do 
-      color1 <- arbitrary
-      color2 <- arbitrary
-      return $ block color1 color2
+    arbitrary = block <$> arbitrary <*> arbitrary
 
 block c1 c2 = Block [((0,0), c1), ((1,0), c2)]
 
