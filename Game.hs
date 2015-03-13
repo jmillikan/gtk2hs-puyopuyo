@@ -18,8 +18,7 @@ import Test.QuickCheck.Arbitrary
 -- Graphics bits use Ix. This shouldn't expose that though...
 data PuyoColor = Red | Green | Blue | Yellow
                deriving (Eq, Ix, Ord, Show)
-data PuyoCell = Empty | Volatile PuyoColor | Stable PuyoColor
-               deriving (Eq, Show)
+type PuyoCell = Maybe (Bool, PuyoColor)
 data GameInput = Tick | Down | Left | Right | RotLeft | RotRight
                deriving (Eq, Show)
 
@@ -41,7 +40,7 @@ data GameState = GameState { _baseState :: BaseState
 makeLenses ''GameState
 
 -- Used for ad-hoc testing... and as the current start board
-exGrid = listArray ((0, 0), (gridHeight - 1, gridWidth - 1)) $ Stable Red : repeat Empty
+exGrid = listArray ((0, 0), (gridHeight - 1, gridWidth - 1)) $ Just (True, Red) : repeat Nothing
 
 instance Arbitrary PuyoColor where
     arbitrary = G.elements [Red, Green, Yellow, Blue]
@@ -71,23 +70,22 @@ getGrid (GameState _ _ grid) = toCellList grid
 getScore :: GameState -> Int
 getScore _ = 9999
 
+
 toCellList :: Grid -> [((Int, Int), Maybe PuyoColor)]
 toCellList g = map (flipY *** color) $ A.assocs g
-    where color Empty = Nothing
-          color (Stable c) = Just c
-          color (Volatile c) = Just c
+    where color = preview (traverse . _2)
           flipY (y,x) = (gridHeight - y - 1,x)
 
-(-%) (x,y) (z,w) = (x-z, y-w)
 (+%) (x,y) (z,w) = (x+z, y+w)
 
 attachBlock :: Block -> (Int, Int) -> Grid -> Grid 
-attachBlock b bix grid = grid // (map (second Volatile) $ blockPairs b bix)
+attachBlock b bix grid = grid // (map (second volatileCell) $ blockPairs b bix)
+    where volatileCell c = Just (False, c)
 
 positionPossible :: Grid -> Block -> (Int, Int) -> Bool
 positionPossible grid b newIx =
     all (inRange (bounds grid)) bixsOnGrid &&
-    all ((Empty ==) . (grid !)) bixsOnGrid
+    all ((Nothing ==) . (grid !)) bixsOnGrid
     where bixsOnGrid = map fst $ blockPairs b newIx
 
 blockPairs :: Block -> (Int, Int) -> [((Int, Int), PuyoColor)]
@@ -97,9 +95,9 @@ droppablePuyos :: Grid -> Bool
 droppablePuyos grid = any (cellDroppable grid) $ A.assocs grid 
 
 cellDroppable :: Grid -> ((Int, Int), PuyoCell) -> Bool
-cellDroppable _ (ix, Empty) = False
+cellDroppable _ (ix, Nothing) = False
 cellDroppable grid (ix, _)  = inRange (bounds grid) (dropIx ix) &&
-                              Empty == grid ! dropIx ix
+                              Nothing == grid ! dropIx ix
 
 dropIx :: (Int, Int) -> (Int, Int)
 dropIx = _1 -~ 1
@@ -113,13 +111,10 @@ dropPuyos = dropMore []
     where dropMore droppedIxs grid = 
               let moreIxs = filter (droppable grid) $ A.assocs grid in
               if moreIxs == [] then grid
-              else dropMore (droppedIxs ++ map dropCell moreIxs) $ (grid // [(ix, Empty) | (ix, _) <- moreIxs])
-                   // [(dropIx ix, makeVolatile cell) | (ix, cell) <- moreIxs]
+              else dropMore (droppedIxs ++ map dropCell moreIxs) $ (grid // [(ix, Nothing) | (ix, _) <- moreIxs])
+                   // [(dropIx ix, setVolatile cell) | (ix, cell) <- moreIxs]
               where droppable grid cell = cellDroppable grid cell && not (elem cell droppedIxs)
-                    makeVolatile cell = case cell of
-                                          Stable c -> Volatile c
-                                          Volatile c -> Volatile c
-                                          Empty -> Empty
+                    setVolatile = set (traverse._1) False
 
 removeablePuyos :: Grid -> Bool
 removeablePuyos grid = not $ null $ removableGroups grid
@@ -130,17 +125,13 @@ removableGroups grid = filter ((> 3) . length) $ map (floodColor . (\(ix,_) -> [
                                   in if newIxs == ixs then ixs 
                                      else floodColor newIxs
           cross ix = filter (inRange $ bounds grid) $ map (+% ix) [(1,0),(-1,0),(0,1),(0,-1)]
-          sameColorIx ix ix2 = sameColor (grid ! ix) (grid ! ix2)
-          sameColor Empty _ = False
-          sameColor _ Empty = False
-          sameColor c1 c2      = colorAt c1 == colorAt c2
-          colorAt (Stable c)   = c
-          colorAt (Volatile c) = c
-          volatile (Volatile c) = True
-          volatile _            = False
+          sameColorIx ix ix2 = (sameColor <$> (grid ! ix) <*> (grid ! ix2)) == Just True
+          sameColor (_,c) (_,c2) = c == c2
+          volatile (Just (False,_)) = True
+          volatile _                = False
 
 breakPuyos :: Grid -> Grid
-breakPuyos grid = grid // [(ix, Empty) | ixs <- removableGroups grid, ix <- ixs]
+breakPuyos grid = grid // [(ix, Nothing) | ixs <- removableGroups grid, ix <- ixs]
 
 -- Currently only works on our 2x2 blocks.
 rotate :: Block -> Bool -> Block
