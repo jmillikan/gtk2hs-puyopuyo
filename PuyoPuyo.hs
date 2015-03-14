@@ -1,7 +1,9 @@
 import Control.Monad
 import Control.Monad.IO.Class
+import Control.Applicative
 import Control.Concurrent.MVar
 import Data.Array
+import Data.Maybe
 import Data.Tuple (swap)
 import Data.Char (toLower)
 import Graphics.UI.Gtk
@@ -109,12 +111,9 @@ main = do
 
   window `on` keyPressEvent $ tryEvent $ do
          key <- fmap (glibToString . keyName) eventKeyVal
-         if key == "n"
-         then liftIO $ restartGame g >> updateDisplay g
-         else return ()
-         case keyNameToInput key of
-           Nothing -> return ()
-           Just input -> liftIO $ runInput g input
+         when (key == "n") (liftIO $ restartGame g >> updateDisplay g)
+         let k = keyNameToInput key
+         when (isJust k) (liftIO $ runInput g $ fromJust k) 
 
   set window [ windowDefaultHeight := 13 * 20, windowDefaultWidth := 200,
                containerChild := layout ]

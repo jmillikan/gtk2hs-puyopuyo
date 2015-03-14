@@ -70,7 +70,6 @@ getGrid (GameState _ _ grid) = toCellList grid
 getScore :: GameState -> Int
 getScore _ = 9999
 
-
 toCellList :: Grid -> [((Int, Int), Maybe PuyoColor)]
 toCellList g = map (flipY *** color) $ A.assocs g
     where color = preview (traverse . _2)
