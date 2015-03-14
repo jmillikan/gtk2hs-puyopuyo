@@ -6,7 +6,6 @@ module Game (newGameState, gameStep, getGrid, getScore, gridWidth, gridHeight, G
 import Control.Lens
 import Control.Arrow
 import Control.Applicative
-import qualified Data.Array as A
 import Data.Array ((!), Array, listArray, (//), bounds, assocs)
 import Data.Ix
 import Data.List (nub)
@@ -26,7 +25,6 @@ data GameInput = Tick | Down | Left | Right | RotLeft | RotRight
 newtype Block = Block { cells :: [((Int, Int), PuyoColor)] }
 
 -- Either "cascading" (blocks dropping/popping) or controlling a 2x2 block with bottom left at (x,y)
---data BaseState = ControlBlock Block (Int, Int) | Cascading | Over
 
 -- Column major, starts at bottom-left
 type Grid = Matrix PuyoCell
@@ -36,10 +34,10 @@ type Matrix a = Array (Int, Int) a
 data GameState = Cascade { _pieceQueue :: [Block]
                          , _gameGrid :: Grid
                          }
-               | ControlBlock   { _pieceQueue :: [Block]
-                                , _gameGrid :: Grid
-                                , _block :: (Block, (Int, Int))
-                                }
+               | ControlBlock { _pieceQueue :: [Block]
+                              , _gameGrid :: Grid
+                              , _block :: (Block, (Int, Int))
+                              }
                | GameOver { _pieceQueue :: [Block]
                           , _gameGrid :: Grid
                           }
@@ -76,9 +74,8 @@ getScore :: GameState -> Int
 getScore _ = 9999
 
 toCellList :: Grid -> [((Int, Int), Maybe PuyoColor)]
-toCellList g = map (flipY *** color) $ A.assocs g
-    where color = preview (traverse . _2)
-          flipY (y,x) = (gridHeight - y - 1,x)
+toCellList g = map (flipY *** (^? (traverse . _2))) $ assocs g
+    where flipY (y,x) = (gridHeight - y - 1,x)
 
 (+%) (x,y) (z,w) = (x+z, y+w)
 
@@ -96,7 +93,7 @@ blockPairs :: (Block, (Int, Int)) -> [((Int, Int), PuyoColor)]
 blockPairs (b, bix) = map (first (+% bix)) $ cells b
 
 droppablePuyos :: Grid -> Bool
-droppablePuyos grid = any (cellDroppable grid) $ A.assocs grid 
+droppablePuyos grid = any (cellDroppable grid) $ assocs grid 
 
 cellDroppable :: Grid -> ((Int, Int), PuyoCell) -> Bool
 cellDroppable _ (ix, Nothing) = False
@@ -113,7 +110,7 @@ dropCell = _1 %~ dropIx
 dropPuyos :: Grid -> Grid
 dropPuyos = dropMore []
     where dropMore droppedIxs grid = 
-              let moreIxs = filter (droppable grid) $ A.assocs grid in
+              let moreIxs = filter (droppable grid) $ assocs grid in
               if moreIxs == [] then grid
               else dropMore (droppedIxs ++ map dropCell moreIxs) $ (grid // [(ix, Nothing) | (ix, _) <- moreIxs])
                    // [(dropIx ix, setVolatile cell) | (ix, cell) <- moreIxs]
@@ -123,13 +120,13 @@ dropPuyos = dropMore []
 removeablePuyos :: Grid -> Bool
 removeablePuyos grid = not $ null $ removableGroups grid
 
-removableGroups grid = filter ((> 3) . length) $ map (floodColor . (\(ix,_) -> [ix])) $ filter (volatile . snd) $ A.assocs grid
+removableGroups grid = filter ((> 3) . length) $ map (floodColor . (\(ix,_) -> [ix])) $ filter (volatile . snd) $ assocs grid
     -- Brute force, not a proper search.
     where floodColor ixs@(ix:_) = let newIxs = nub $ (++) ixs $ filter (sameColorIx ix) $ concat $ map cross ixs
                                   in if newIxs == ixs then ixs 
                                      else floodColor newIxs
           cross ix = filter (inRange $ bounds grid) $ map (+% ix) [(1,0),(-1,0),(0,1),(0,-1)]
-          sameColorIx ix ix2 = (sameColor <$> (grid ! ix) <*> (grid ! ix2)) == Just True
+          sameColorIx ix ix2 = Just True == (sameColor <$> grid ! ix <*> grid ! ix2)
           sameColor (_,c) (_,c2) = c == c2
           volatile (Just (False,_)) = True
           volatile _                = False
@@ -150,29 +147,27 @@ newGameState = do
 -- This is a mess but does cover everything (Cascading + tick, Cascading + other, ControlBlock + all)
 gameStep :: GameState -> GameInput -> (GameState, ModifyTimer)
 gameStep g@(GameOver _ _) _ = (g, Nothing)
-gameStep g@(Cascade queue@(b:bs) grid) Tick
+gameStep g@(Cascade (b:bs) grid) Tick
     -- Right now, the speed of these is locked to the tick since I haven't botherered making any intermediate states.
     | droppablePuyos grid  = (gameGrid %~ dropPuyos $ g, Nothing)
     | removeablePuyos grid = (gameGrid %~ breakPuyos $ g, Nothing)
     | otherwise            = if positionPossible grid (b, (11, 1))
                              then (ControlBlock bs grid (b, (11,1)), Just dropTimeout)
-                             else (GameOver queue grid, Nothing)
+                             else (GameOver (b:bs) grid, Nothing)
 gameStep g@(Cascade _ _) _ = (g, Nothing) -- Ignore input while cascading
 gameStep g@(ControlBlock queue grid bl) input = 
     case input of
-      Tick -> tryDrop
-      Game.Left -> tryMove (0,-1)
-      Game.Right -> tryMove (0,1)
-      Game.Down -> tryDrop
-      RotLeft -> tryRotate True
-      RotRight -> tryRotate False
-    where tryRotate left = tryChange (_1 %~ rotate left) Nothing noChange
-          tryMove mv     = tryChange (_2 %~ (+%) mv) Nothing noChange
-          tryDrop        = tryChange (_2._1 -~ 1) (Just dropTimeout) toCascade
-          -- Try a move/rotate. If successful, "keep it" with the timer change. If failed, return fail.
-          tryChange change succeedTimerChange fail
-              | positionPossible grid (change bl) =
-                  (ControlBlock queue grid (change bl), succeedTimerChange)
-              | otherwise = fail
-          noChange = (g, Nothing)
-          toCascade = (Cascade queue (attachBlock bl grid), Just cascadeTimeout)
+      Tick       -> tryDrop
+      Game.Left  -> tryShift (_2 %~ (+%) (0,-1)) 
+      Game.Right -> tryShift (_2 %~ (+%) (0,1)) 
+      Game.Down  -> tryDrop
+      RotLeft    -> tryShift (_1 %~ rotate True)
+      RotRight   -> tryShift (_1 %~ rotate False)
+    where tryShift change = if positionPossible grid (change bl) 
+                            then (ControlBlock queue grid (change bl), Nothing)
+                            else (g, Nothing)
+          tryDrop = if positionPossible grid (drop bl) 
+                    then (ControlBlock queue grid (drop bl), (Just dropTimeout))
+                    else (Cascade queue (attachBlock bl grid), Just cascadeTimeout)
+          drop = (_2._1 -~ 1)
+
