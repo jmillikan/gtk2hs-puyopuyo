@@ -3,14 +3,14 @@
 
 module Game (newGameState, gameStep, getGrid, getScore, gridWidth, gridHeight, GameState, PuyoColor(..), GameInput(..)) where
 
-import Control.Lens
+import Control.Lens hiding (elements)
 import Control.Arrow
 import Control.Applicative
 import Data.Array ((!), Array, listArray, (//), bounds, assocs)
 import Data.Ix
 import Data.List (nub)
 import System.Random
-import qualified Test.QuickCheck.Gen as G
+import Test.QuickCheck.Gen
 import Test.QuickCheck.Random
 import Test.QuickCheck.Arbitrary
 
@@ -48,7 +48,7 @@ makeLenses ''GameState
 exGrid = listArray ((0, 0), (gridHeight - 1, gridWidth - 1)) $ Just (True, Red) : repeat Nothing
 
 instance Arbitrary PuyoColor where
-    arbitrary = G.elements [Red, Green, Yellow, Blue]
+    arbitrary = elements [Red, Green, Yellow, Blue]
 
 instance Arbitrary Block where
     arbitrary = makeBlock <$> arbitrary <*> arbitrary
@@ -65,7 +65,7 @@ dropTimeout = 1000
 type ModifyTimer = Maybe Int
 
 blockQueue :: Int -> [Block]
-blockQueue seed = G.unGen infiniteList (mkQCGen seed) seed 
+blockQueue seed = unGen infiniteList (mkQCGen seed) seed 
 
 getGrid :: GameState -> [((Int, Int), Maybe PuyoColor)]
 getGrid state = toCellList $ maybe id attachBlock (state^?block) $ state^.gameGrid
@@ -80,7 +80,7 @@ toCellList g = map (flipY *** (^? (traverse . _2))) $ assocs g
 (+%) (x,y) (z,w) = (x+z, y+w)
 
 attachBlock :: (Block, (Int, Int)) -> Grid -> Grid 
-attachBlock b grid = grid // (map (second volatileCell) $ blockPairs b)
+attachBlock b grid = grid // (map (_2 %~ volatileCell) $ blockPairs b)
     where volatileCell c = Just (False, c)
 
 positionPossible :: Grid -> (Block, (Int, Int)) -> Bool
@@ -90,7 +90,7 @@ positionPossible grid b =
     where bixsOnGrid = map fst $ blockPairs b
 
 blockPairs :: (Block, (Int, Int)) -> [((Int, Int), PuyoColor)]
-blockPairs (b, bix) = map (first (+% bix)) $ cells b
+blockPairs (b, bix) = map (_1 %~ (+% bix)) $ cells b
 
 droppablePuyos :: Grid -> Bool
 droppablePuyos grid = any (cellDroppable grid) $ assocs grid 
@@ -112,10 +112,10 @@ dropPuyos = dropMore []
     where dropMore droppedIxs grid = 
               let moreIxs = filter (droppable grid) $ assocs grid in
               if moreIxs == [] then grid
-              else dropMore (droppedIxs ++ map dropCell moreIxs) $ (grid // [(ix, Nothing) | (ix, _) <- moreIxs])
-                   // [(dropIx ix, setVolatile cell) | (ix, cell) <- moreIxs]
+              else dropMore (droppedIxs ++ map dropCell moreIxs) $ 
+                       (grid // ((traverse._2) .~ Nothing $ moreIxs))
+                       // map (dropIx *** (traverse._1) .~ False) moreIxs
               where droppable grid cell = cellDroppable grid cell && not (elem cell droppedIxs)
-                    setVolatile = set (traverse._1) False
 
 removeablePuyos :: Grid -> Bool
 removeablePuyos grid = not $ null $ removableGroups grid
@@ -132,11 +132,11 @@ removableGroups grid = filter ((> 3) . length) $ map (floodColor . (\(ix,_) -> [
           volatile _                = False
 
 breakPuyos :: Grid -> Grid
-breakPuyos grid = grid // [(ix, Nothing) | ixs <- removableGroups grid, ix <- ixs]
+breakPuyos grid = grid // [(ix, Nothing) | ix <- concat $ removableGroups grid]
 
 -- Currently only works on our 2x2 blocks.
 rotate :: Bool -> Block -> Block
-rotate rotLeft bl = Block $ map (first trans) $ cells bl
+rotate rotLeft bl = Block $ map (_1 %~ trans) $ cells bl
     where trans (y,x) = (if rotLeft then 1 - x else x, if rotLeft then y else 1 - y)
 
 newGameState :: IO (GameState, Int)
@@ -170,4 +170,3 @@ gameStep g@(ControlBlock queue grid bl) input =
                     then (ControlBlock queue grid (drop bl), (Just dropTimeout))
                     else (Cascade queue (attachBlock bl grid), Just cascadeTimeout)
           drop = (_2._1 -~ 1)
-
