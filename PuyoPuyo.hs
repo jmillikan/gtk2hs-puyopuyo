@@ -17,6 +17,7 @@ data GameSetup = GameSetup { gameState :: MVar (Maybe (GameState, HandlerId))
                            , cellImages :: Array (Int, Int) Image
                            , colorPixbufs :: Array PuyoColor Pixbuf
                            , emptyPixbuf :: Pixbuf
+                           , scoreLabel :: Label
                            }
 
 -- Used to load cell images on startup
@@ -32,10 +33,11 @@ setCellImage g cell image = imageSetFromPixbuf image $
 tableAttachCell table s ix@(row,col) = tableAttach table (cellImages s ! ix) col (col + 1) row (row + 1) [Fill] [Fill] 0 0
 
 updateDisplay :: GameSetup -> IO ()
-updateDisplay g@(GameSetup stateV images _ _) = do
+updateDisplay g@(GameSetup stateV images _ _ score) = do
   st <- readMVar stateV
   case st of Nothing -> return ()
              Just (state, _) -> do
+               labelSetText score $ show $ getScore state
                mapM_ (\(ix, c) -> setCellImage g c (images ! ix)) $ getGrid state
 
 restartGame :: GameSetup -> IO ()
@@ -55,7 +57,7 @@ updateTimer g oldTimer timerChange =
 runInput :: GameSetup -> GameInput -> IO ()
 runInput s input = do 
   modifyMVar_ (gameState s) $ \oldState -> 
-      case oldState of Nothing -> error "Shouldn't tick while not running."
+      case oldState of Nothing -> return Nothing
                        Just (oldState, oldTimer) -> do
                            let (newState, timerChange) = gameStep oldState input -- game logic call
                            newTimer <- updateTimer s oldTimer timerChange
@@ -99,6 +101,7 @@ main = do
              (listArray ((0,0), (gridHeight - 1, gridWidth - 1)) images)
              (listArray (Red,Yellow) colorBufs)
              emptyBuf
+             score
 
   -- Until the image controls contain images, the shape/size is wrong.
   mapM (\i -> setCellImage g Nothing i) images
@@ -110,7 +113,7 @@ main = do
          updateDisplay g
 
   window `on` keyPressEvent $ tryEvent $ do
-         key <- fmap (glibToString . keyName) eventKeyVal
+         key <- (glibToString . keyName) <$> eventKeyVal
          when (key == "n") (liftIO $ restartGame g >> updateDisplay g)
          let k = keyNameToInput key
          when (isJust k) (liftIO $ runInput g $ fromJust k) 
