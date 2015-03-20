@@ -9,7 +9,7 @@ import Control.Applicative
 import Control.Monad
 import Data.Array ((!), Array, listArray, (//), bounds, assocs)
 import Data.Ix
-import Data.List (nub)
+import Data.List (nub, sort)
 import System.Random
 import Test.QuickCheck.Gen
 import Test.QuickCheck.Random
@@ -51,6 +51,8 @@ makeLenses ''GameState
 
 -- Used for ad-hoc testing... and as the current start board
 exGrid = listArray ((0, 0), (gridHeight - 1, gridWidth - 1)) $ Just (True, Red) : repeat Nothing
+redsGrid = exGrid // [((0,x),Just (False,Red)) | x <- [1..4]]
+rgGrid = redsGrid // [((1,x),Just (False,Green)) | x <- [1..4]]
 
 instance Arbitrary PuyoColor where
     arbitrary = elements [Red, Green, Yellow, Blue]
@@ -66,6 +68,8 @@ gridHeight, gridWidth :: Int
 cascadeTimeout, dropTimeout :: Int
 cascadeTimeout = 600
 dropTimeout = 1000
+
+scoreUnit = 10
 
 type ModifyTimer = Maybe Int
 
@@ -125,16 +129,21 @@ dropPuyos = dropMore []
 removeablePuyos :: Grid -> Bool
 removeablePuyos grid = not $ null $ removableGroups grid
 
-removableGroups grid = filter ((> 3) . length) $ map (floodColor . (\(ix,_) -> [ix])) $ filter (volatile . snd) $ assocs grid
-    -- Brute force, not a proper search.
-    where floodColor ixs@(ix:_) = let newIxs = nub $ (++) ixs $ filter (sameColorIx ix) $ concat $ map cross ixs
+-- Not particularly elegant
+removableGroups grid = nub $ map sort allGroups -- allGroups contains a group for each volatile checked.
+    where allGroups = filter ((> 3) . length) $ map (floodColor . (\(ix,_) -> [ix])) $ filter (volatile . snd) $ assocs grid
+          floodColor ixs@(ix:_) = let newIxs = nub $ (++) ixs $ filter (sameColorIx ix) $ concat $ map cross ixs
                                   in if newIxs == ixs then ixs 
                                      else floodColor newIxs
+              
           cross ix = filter (inRange $ bounds grid) $ map (+% ix) [(1,0),(-1,0),(0,1),(0,-1)]
           sameColorIx ix ix2 = Just True == (sameColor <$> grid ! ix <*> grid ! ix2)
           sameColor (_,c) (_,c2) = c == c2
           volatile (Just (False,_)) = True
           volatile _                = False
+
+-- removeGroup :: [(Int,Int)] -> Grid -> Grid
+-- removeGroup g grid = grid // [(ix, Nothing) | ix <- g]
 
 breakPuyos :: Grid -> (Grid, Int)
 breakPuyos grid = (newGrid, length $ removableGroups grid)
@@ -157,7 +166,7 @@ gameStep g@(Cascade (b:bs) grid sc inc) Tick
     -- Right now, the speed of these is locked to the tick since I haven't botherered making any intermediate states.
     | droppablePuyos grid  = (gameGrid %~ dropPuyos $ g, Nothing)
     | removeablePuyos grid = let (newGrid, groupsBroken) = breakPuyos $ g^.gameGrid in
-                             (scoreInc +~ (10 * groupsBroken) $ score +~ inc $ gameGrid .~ newGrid $ g, Nothing)
+                             (scoreInc +~ scoreUnit $ score +~ groupsBroken * inc $ gameGrid .~ newGrid $ g, Nothing)
     | otherwise            = if positionPossible grid (b, (11, 1))
                              then (ControlBlock bs grid (b, (11,1)) sc, Just dropTimeout)
                              else (GameOver (b:bs) grid sc, Nothing)
