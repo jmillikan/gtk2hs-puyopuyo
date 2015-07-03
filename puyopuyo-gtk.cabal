@@ -16,7 +16,6 @@ extra-source-files:  README
 cabal-version:       >=1.10
 data-files:          
   images/*.png
-  images/jack.png
 
 executable puyopuyo-gtk
   main-is:             Main.hs
