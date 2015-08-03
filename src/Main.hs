@@ -3,9 +3,9 @@ import Control.Monad.IO.Class
 import Control.Applicative
 import Control.Concurrent.MVar
 import Data.Array
-import Data.Maybe
 import Data.Tuple (swap)
 import Data.Char (toLower)
+import qualified Data.Map as M
 import Graphics.UI.Gtk
 import System.Glib.UTFString
 
@@ -70,18 +70,17 @@ runInput s input = do
   updateDisplay s
 
 keyNameToInput :: String -> Maybe GameInput
-keyNameToInput k = case k of
-                     "Left" -> Just GILeft
-                     "Down" -> Just GIDown
-                     "Right" -> Just GIRight
-                     "a" -> Just GILeft
-                     "s" -> Just GIDown
-                     "d" -> Just GIRight
-                     "Control_L" -> Just G.RotLeft
-                     "Alt_L" -> Just G.RotRight
-                     "Alt_R" -> Just G.RotLeft
-                     "Control_R" -> Just G.RotRight
-                     _ -> Nothing
+keyNameToInput = flip M.lookup $ M.fromList [ ("Left", GILeft)
+                                            , ("Down", GIDown)
+                                            , ("Right", GIRight)
+                                            , ("a", GILeft)
+                                            , ("s", GIDown)
+                                            , ("d", GIRight)
+                                            , ("Control_L", G.RotLeft)
+                                            , ("Alt_L", G.RotRight)
+                                            , ("Alt_R", G.RotLeft)
+                                            , ("Control_R", G.RotRight)
+                                            ]
 
 colorFileName :: Maybe PuyoColor -> IO FilePath
 colorFileName c = getDataFileName $ maybe "images/empty.png" (\color -> "images/" ++ (map toLower $ show color ++ ".png")) c 
@@ -105,6 +104,7 @@ main = do
   tableAttachDefaults screenKeys rotR 2 3 0 1
 
   newGameButton <- buttonNewWithLabel ("New Game" :: String)
+
   tableAttachDefaults layout imageTable 0 1 0 3
   tableAttachDefaults layout score 1 2 0 1
   tableAttachDefaults layout screenKeys 1 2 1 2
@@ -138,12 +138,15 @@ main = do
 
   window `on` keyPressEvent $ tryEvent $ do
          key <- (glibToString . keyName) <$> eventKeyVal
-         when (key == "n") (liftIO newGame)
-         let k = keyNameToInput key
-         when (isJust k) (liftIO $ runInput g $ fromJust k) 
+         case (key, keyNameToInput key) of
+           ("n",_) -> liftIO newGame
+           (_,Just input) -> liftIO $ runInput g input
+           _ -> return ()
 
-  set window [ windowDefaultHeight := gridHeight * 20, windowDefaultWidth := 180,
-               containerChild := layout ]
+  set window [ windowDefaultHeight := gridHeight * 20
+             , windowDefaultWidth := 180
+             , containerChild := layout 
+             ]
   onDestroy window mainQuit
   widgetShowAll window
   mainGUI
